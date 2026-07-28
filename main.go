@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
@@ -40,11 +41,21 @@ func main() {
 	if err := initSchema(db); err != nil {
 		log.Fatalf("cannot init schema: %v", err)
 	}
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379"
+	}
+	cache := newCache(redisAddr)
+	if err := cache.Ping(context.Background()); err != nil {
+		log.Printf("WARNING: cache disabled, will fall back to database: %v", err)
+	} else {
+		log.Println("cache connected")
+	}
 
 	app := fiber.New(fiber.Config{ErrorHandler: jsonErrorHandler})
 	app.Use(logger.New())
 
-	h := &Handler{db: db}
+	h := &Handler{db: db, cache: cache}
 	app.Post("/shorten", h.Shorten)
 	app.Get("/healthz", func(c *fiber.Ctx) error { return c.SendStatus(http.StatusOK) })
 	app.Get("/:code", h.Redirect)
@@ -69,9 +80,10 @@ CREATE TABLE IF NOT EXISTS urls (
 	return err
 }
 
-// Handler holds the shared database connection.
+// Handler holds the shared database connection and URL cache.
 type Handler struct {
-	db *sql.DB
+	db    *sql.DB
+	cache *Cache
 }
 
 // ShortenRequest is the body sent to POST /shorten.
@@ -109,11 +121,19 @@ func (h *Handler) Shorten(c *fiber.Ctx) error {
 }
 
 // Redirect reads the original URL for the given code and sends the client there.
+// It reads from the Redis cache first. On a cache miss, it reads from PostgreSQL
+// and back-fills the cache so the next read is a hit.
 func (h *Handler) Redirect(c *fiber.Ctx) error {
 	code := c.Params("code")
 	if code == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "code is required")
 	}
+
+	if url, ok := h.cache.GetURL(c.Context(), code); ok {
+		log.Printf("cache HIT for %s", code)
+		return c.Redirect(url, http.StatusMovedPermanently)
+	}
+	log.Printf("cache MISS for %s", code)
 
 	var original string
 	const q = `SELECT original_url FROM urls WHERE code = $1`
@@ -125,6 +145,7 @@ func (h *Handler) Redirect(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "cannot read url")
 	}
 
+	h.cache.SetURL(c.Context(), code, original)
 	return c.Redirect(original, http.StatusMovedPermanently)
 }
 
