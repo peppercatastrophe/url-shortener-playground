@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shortener-config
+  namespace: shortener
+data:
+  REDIS_ADDR: "redis:6379"
+  RABBITMQ_ADDR: "amqp://guest:guest@rabbitmq:5672/"
+  PORT: "3000"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-schema
+  namespace: shortener
+data:
+  01-schema.sql: |
+    -- urls table: maps a short code to the original URL.
+    CREATE TABLE IF NOT EXISTS urls (
+        code         VARCHAR(16) PRIMARY KEY,
+        original_url TEXT NOT NULL,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- clicks table: one row per redirect, written by the worker.
+    CREATE TABLE IF NOT EXISTS clicks (
+        id         BIGSERIAL PRIMARY KEY,
+        code       VARCHAR(16) NOT NULL,
+        clicked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
