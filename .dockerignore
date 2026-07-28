@@ -1,0 +1,7 @@
+*.md
+.env*
+.git
+.github
+load
+k8s
+sql
