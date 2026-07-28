@@ -26,6 +26,17 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: shortener-rabbit
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
 
 volumes:
   shortener-data:
