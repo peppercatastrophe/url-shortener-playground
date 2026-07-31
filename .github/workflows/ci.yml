@@ -15,6 +15,7 @@ permissions:
 
 jobs:
 
+
   # ── Job 1: lint, test, build ──────────────────────────────────────
   test:
     runs-on: ubuntu-latest
@@ -102,14 +103,21 @@ jobs:
 
       - name: Smoke test
         run: |
-          kubectl port-forward svc/api -n shortener 3000:3000 &
-          sleep 5
-          curl -sf http://localhost:3000/healthz
+          API_POD=$(kubectl get pod -l app=api -n shortener -o jsonpath='{.items[0].metadata.name}')
+
+          echo "=== health ==="
+          kubectl exec -n shortener "$API_POD" -- curl -sf http://localhost:3000/healthz
           echo
-          RESP=$(curl -sf -X POST http://localhost:3000/shorten \
+
+          echo "=== shorten ==="
+          RESP=$(kubectl exec -n shortener "$API_POD" -- curl -sf -X POST \
             -H "Content-Type: application/json" \
-            -d '{"url":"https://example.com/ci-smoke-test"}')
+            -d '{"url":"https://example.com/ci-smoke-test"}' \
+            http://localhost:3000/shorten)
           echo "$RESP"
           CODE=$(echo "$RESP" | grep -o '"code":"[^"]*"' | cut -d'"' -f4)
-          curl -sf -o /dev/null -w "%{http_code}" "http://localhost:3000/$CODE"
+
+          echo "=== redirect ==="
+          kubectl exec -n shortener "$API_POD" -- curl -s -o /dev/null \
+            -w "%{http_code}" http://localhost:3000/$CODE
           echo

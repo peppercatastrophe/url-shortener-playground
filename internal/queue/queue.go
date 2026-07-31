@@ -68,7 +68,9 @@ func NewPublisher(addr string) (*Publisher, error) {
 	}
 	conn, ch, err := dial(addr)
 	if err != nil {
-		return nil, err
+		// Return a disabled publisher (nil channel) instead of nil,
+		// so the API can run with the queue unavailable without panicking.
+		return &Publisher{}, err
 	}
 	return &Publisher{conn: conn, ch: ch}, nil
 }

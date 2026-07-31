@@ -16,7 +16,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /out/worker ./cmd/worker
 
 # --- Runtime stage ---
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates curl
 COPY --from=build /out/api    /usr/local/bin/api
 COPY --from=build /out/worker /usr/local/bin/worker
 EXPOSE 3000
