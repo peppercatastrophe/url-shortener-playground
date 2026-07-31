@@ -1,0 +1,122 @@
+name: build-and-deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  GO_VERSION: '1.24'
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+
+  # ── Job 1: lint, test, build ──────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download dependencies
+        working-directory: url-shortener
+        run: go mod download
+
+      - name: Vet
+        working-directory: url-shortener
+        run: go vet ./...
+
+      - name: Test
+        working-directory: url-shortener
+        run: go test -v -count=1 ./...
+
+      - name: Build
+        working-directory: url-shortener
+        run: go build ./...
+
+  # ── Job 2: build and push Docker image ────────────────────────────
+  build-image:
+    needs: test
+    runs-on: ubuntu-latest
+    # Only push on main; PRs build to verify the Dockerfile works.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        working-directory: url-shortener
+        run: docker build -t ${{ env.IMAGE_NAME }}:dev .
+
+      - name: Log in to GHCR
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        if: github.ref == 'refs/heads/main'
+        working-directory: url-shortener
+        run: docker push ${{ env.IMAGE_NAME }}:dev
+
+  # ── Job 3: deploy to a kind cluster and verify ────────────────────
+  deploy-kind:
+    needs: build-image
+    # Only deploy on main pushes (not PRs).
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image
+        run: docker pull ${{ env.IMAGE_NAME }}:dev
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: shortener-ci
+          wait: 60s
+
+      - name: Load image into kind
+        run: kind load docker-image ${{ env.IMAGE_NAME }}:dev --name shortener-ci
+
+      - name: Patch image name in manifests
+        working-directory: url-shortener
+        run: |
+          sed -i 's|localhost/shortener-api:dev|${{ env.IMAGE_NAME }}:dev|g' k8s/20-api.yaml k8s/30-worker.yaml
+
+      - name: Deploy to kind
+        working-directory: url-shortener
+        run: kubectl apply -f k8s/
+
+      - name: Wait for pods to be ready
+        working-directory: url-shortener
+        run: |
+          kubectl wait --for=condition=Ready pod -l app=api -n shortener --timeout=120s
+          kubectl wait --for=condition=Ready pod -l app=worker -n shortener --timeout=120s
+
+      - name: Smoke test
+        working-directory: url-shortener
+        run: |
+          kubectl port-forward svc/api -n shortener 3000:3000 &
+          sleep 5
+          curl -sf http://localhost:3000/healthz
+          echo
+          RESP=$(curl -sf -X POST http://localhost:3000/shorten \
+            -H "Content-Type: application/json" \
+            -d '{"url":"https://example.com/ci-smoke-test"}')
+          echo "$RESP"
+          CODE=$(echo "$RESP" | grep -o '"code":"[^"]*"' | cut -d'"' -f4)
+          curl -sf -o /dev/null -w "%{http_code}" "http://localhost:3000/$CODE"
+          echo
