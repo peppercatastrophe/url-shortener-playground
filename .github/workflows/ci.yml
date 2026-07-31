@@ -23,19 +23,19 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Download dependencies
-        working-directory: url-shortener
+        working-directory: url-shortener-playground
         run: go mod download
 
       - name: Vet
-        working-directory: url-shortener
+        working-directory: url-shortener-playground
         run: go vet ./...
 
       - name: Test
-        working-directory: url-shortener
+        working-directory: url-shortener-playground
         run: go test -v -count=1 ./...
 
       - name: Build
-        working-directory: url-shortener
+        working-directory: url-shortener-playground
         run: go build ./...
 
   # ── Job 2: build and push Docker image ────────────────────────────
@@ -47,7 +47,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build image
-        working-directory: url-shortener
+        working-directory: url-shortener-playground
         run: docker build -t ${{ env.IMAGE_NAME }}:dev .
 
       - name: Log in to GHCR
@@ -60,7 +60,7 @@ jobs:
 
       - name: Push image
         if: github.ref == 'refs/heads/main'
-        working-directory: url-shortener
+        working-directory: url-shortener-playground
         run: docker push ${{ env.IMAGE_NAME }}:dev
 
   # ── Job 3: deploy to a kind cluster and verify ────────────────────
@@ -92,22 +92,22 @@ jobs:
         run: kind load docker-image ${{ env.IMAGE_NAME }}:dev --name shortener-ci
 
       - name: Patch image name in manifests
-        working-directory: url-shortener
+        working-directory: url-shortener-playground
         run: |
           sed -i 's|localhost/shortener-api:dev|${{ env.IMAGE_NAME }}:dev|g' k8s/20-api.yaml k8s/30-worker.yaml
 
       - name: Deploy to kind
-        working-directory: url-shortener
+        working-directory: url-shortener-playground
         run: kubectl apply -f k8s/
 
       - name: Wait for pods to be ready
-        working-directory: url-shortener
+        working-directory: url-shortener-playground
         run: |
           kubectl wait --for=condition=Ready pod -l app=api -n shortener --timeout=120s
           kubectl wait --for=condition=Ready pod -l app=worker -n shortener --timeout=120s
 
       - name: Smoke test
-        working-directory: url-shortener
+        working-directory: url-shortener-playground
         run: |
           kubectl port-forward svc/api -n shortener 3000:3000 &
           sleep 5
