@@ -27,9 +27,10 @@ func main() {
 	}
 	defer st.Close()
 
-	if err := st.InitSchema(); err != nil {
-		log.Fatalf("cannot init schema: %v", err)
+	if err := st.Migrate(context.Background()); err != nil {
+		log.Fatalf("cannot migrate database: %v", err)
 	}
+
 
 	rabbitAddr := os.Getenv("RABBITMQ_ADDR")
 	if rabbitAddr == "" {

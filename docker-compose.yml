@@ -37,6 +37,25 @@ services:
       interval: 10s
       timeout: 10s
       retries: 10
+  grpc:
+    build: .
+    container_name: shortener-grpc
+    command: ["/usr/local/bin/grpc"]
+    environment:
+      DATABASE_URL: "postgres://shortener:shortener@db:5432/shortener?sslmode=disable"
+      REDIS_ADDR: "redis:6379"
+      RABBITMQ_ADDR: "amqp://guest:guest@rabbitmq:5672/"
+      GRPC_ADDR: ":50051"
+      GRPC_AUTH_TOKEN: "shortener-secret-token"
+    ports:
+      - "50051:50051"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
 volumes:
   shortener-data:

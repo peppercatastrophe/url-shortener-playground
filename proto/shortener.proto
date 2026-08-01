@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package shortener.v1;
+
+option go_package = "url-shortener/internal/proto/shortenerpb;shortenerpb";
+
+// Shortener is the internal gRPC API for the URL shortener.
+// It mirrors the REST API for service-to-service calls where low overhead,
+// strong typing, and deadline propagation matter more than human readability.
+// Clients authenticate with a bearer token via the `authorization` metadata
+// header ("Bearer <token>"); an interceptor validates it on every call.
+service Shortener {
+  // Resolve returns the original URL for a short code.
+  // On a cache miss it reads from PostgreSQL and back-fills Redis.
+  // Returns NOT_FOUND if the code does not exist.
+  rpc Resolve(ResolveRequest) returns (ResolveResponse);
+
+  // ReportClick accepts a click event and publishes it to the RabbitMQ
+  // clicks queue for async persistence by the worker. Best-effort: queue
+  // unavailability returns UNAVAILABLE rather than failing the caller's
+  // logical operation.
+  rpc ReportClick(ClickEvent) returns (ClickResponse);
+}
+
+// ResolveRequest carries the short code to look up.
+message ResolveRequest {
+  string code = 1;
+}
+
+// ResolveResponse carries the original URL and whether it came from cache.
+message ResolveResponse {
+  string original_url = 1;
+  bool from_cache = 2;
+}
+
+// ClickEvent is a single redirect observation.
+message ClickEvent {
+  string code = 1;
+  // clicked_at is the time the redirect happened, in nanoseconds since epoch.
+  int64 clicked_at_unix_nano = 2;
+}
+
+// ClickResponse is the empty ack for a reported click.
+message ClickResponse {}

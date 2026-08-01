@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grpc
+  namespace: shortener
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: grpc
+  template:
+    metadata:
+      labels:
+        app: grpc
+    spec:
+      containers:
+        - name: grpc
+          image: localhost/shortener-api:dev
+          imagePullPolicy: Never
+          command: ["/usr/local/bin/grpc"]
+          ports:
+            - containerPort: 50051
+          envFrom:
+            - configMapRef:
+                name: shortener-config
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shortener-secret
+                  key: postgres-password
+            - name: DATABASE_URL
+              value: "postgres://shortener:$(POSTGRES_PASSWORD)@postgres:5432/shortener?sslmode=disable"
+            - name: GRPC_ADDR
+              value: ":50051"
+            - name: GRPC_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: shortener-secret
+                  key: grpc-auth-token
+          readinessProbe:
+            tcpSocket:
+              port: 50051
+            initialDelaySeconds: 3
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grpc
+  namespace: shortener
+spec:
+  selector:
+    app: grpc
+  ports:
+    - port: 50051
+      targetPort: 50051
