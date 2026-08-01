@@ -21,7 +21,8 @@ import (
 
 // Store wraps a PostgreSQL connection pool.
 type Store struct {
-	db *sql.DB
+	db  *sql.DB
+	dsn string
 }
 
 // New opens a connection pool to dsn and tunes it for a small service.
@@ -32,8 +33,7 @@ func New(dsn string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(time.Minute)
-	return &Store{db: db}, nil
+	return &Store{db: db, dsn: dsn}, nil
 }
 
 // Close closes the underlying connection pool.
@@ -41,17 +41,34 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// DB returns the underlying *sql.DB for direct access (test helpers, ad-hoc queries).
+func (s *Store) DB() *sql.DB { return s.db }
+
 // Migrate applies all embedded SQL migrations up to the latest version.
-// Migrations live in migrations/ and are embedded via migrations/sql/fs.go
+// Migrations live in migrations/ and are embedded via migrations/embed.go
 // so the binaries are self-contained: no external migration files needed.
 // This replaces the old CREATE TABLE IF NOT EXISTS bootstrap and gives a
 // versioned, reversible schema history (golang-migrate).
+//
+// Migrate opens a SEPARATE *sql.DB for golang-migrate and closes it before
+// returning. This is critical: postgresdrv.WithInstance takes ownership of
+// the *sql.DB it wraps, and migrate's Close() closes that DB. If we passed
+// the store's shared query pool (s.db), m.Close() would close it and every
+// subsequent query in the process would fail with "sql: database is closed".
+// Using a throwaway connection keeps the store's pool alive after migration.
 func (s *Store) Migrate(ctx context.Context) error {
 	src, err := iofs.New(migrations.FS, ".")
 	if err != nil {
 		return fmt.Errorf("open migration source: %w", err)
 	}
-	pgDrv, err := postgresdrv.WithInstance(s.db, &postgresdrv.Config{})
+
+	migDB, err := sql.Open("postgres", s.dsn)
+	if err != nil {
+		return fmt.Errorf("open migration database: %w", err)
+	}
+	defer migDB.Close()
+
+	pgDrv, err := postgresdrv.WithInstance(migDB, &postgresdrv.Config{})
 	if err != nil {
 		return fmt.Errorf("init postgres migrate driver: %w", err)
 	}
