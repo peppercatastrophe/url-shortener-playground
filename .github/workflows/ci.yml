@@ -122,6 +122,8 @@ jobs:
             -w "%{http_code}" http://localhost:3000/$CODE
           echo
 
-          echo "=== grpc health (tcp) ==="
-          GRPC_POD=$(kubectl get pod -l app=grpc -n shortener -o jsonpath='{.items[0].metadata.name}')
-          kubectl exec -n shortener "$GRPC_POD" -- sh -c 'echo > /dev/tcp/localhost/50051 && echo "grpc port open"'
+          echo "=== grpc ready ==="
+          kubectl -n shortener get pod -l app=grpc -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{" "ready="}{.status.containerStatuses[0].ready}{"\n"}{end}'
+
+          # gRPC TCP readiness already verified by the Deployment's readinessProbe
+          # (tcpSocket port 50051) and the `kubectl wait` step above.
